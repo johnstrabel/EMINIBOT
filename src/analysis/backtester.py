@@ -99,15 +99,24 @@ class Backtester:
         # Reset state
         self._reset_state()
         
-        # Run bar-by-bar simulation
+        # PRE-CALCULATE ALL INDICATORS ONCE (FAST!)
+        if verbose:
+            print(f"\n⚡ Pre-calculating indicators (this is the slow part)...")
+        
+        data = self._precalculate_indicators(data)
+        
+        if verbose:
+            print(f"✅ Indicators calculated!")
+        
+        # Run bar-by-bar simulation (now fast!)
         if verbose:
             print(f"\n🔄 Running simulation...")
         
         for i in range(len(data)):
-            self._process_bar(data, i)
+            self._process_bar_fast(data, i)
             
             # Progress indicator
-            if verbose and i % 100 == 0 and i > 0:
+            if verbose and i % 500 == 0 and i > 0:
                 progress = (i / len(data)) * 100
                 print(f"  Progress: {progress:.1f}% ({i}/{len(data)} bars)")
         
@@ -154,10 +163,60 @@ class Backtester:
         self.daily_returns = []
         self.current_equity = self.initial_capital
     
-    def _process_bar(self, data: pd.DataFrame, i: int):
-        """Process a single bar"""
-        # Get data up to current bar (for indicators)
-        current_data = data.iloc[:i+1].copy()
+    def _precalculate_indicators(self, data: pd.DataFrame) -> pd.DataFrame:
+        """Pre-calculate all indicators on full dataset (MUCH faster!)"""
+        # Run all indicators at once on full dataset
+        data, results = self.signal_generator.analyze_all_indicators(data)
+        
+        # Add signal columns we'll need
+        data['should_buy'] = False
+        data['should_sell'] = False
+        data['signal_strength'] = 0
+        data['position_size'] = 0
+        
+        # Generate signals for each bar (still need to do this row by row for alignment checks)
+        for i in range(50, len(data)):  # Start at 50 to have enough history
+            # Get just the current bar's indicator values
+            current_bar = data.iloc[i]
+            
+            # Extract signals from pre-calculated indicators
+            signals = {
+                'order_flow': int(current_bar.get('order_flow_signal', 0)),
+                'volume_profile': int(current_bar.get('vp_signal', 0)),
+                'market_structure': int(current_bar.get('structure_signal', 0)),
+                'session_adjustment': float(current_bar.get('session_signal_adjustment', 1.0))
+            }
+            
+            # Check alignment
+            alignment = self.signal_generator.check_alignment(signals)
+            
+            # Calculate strength (simplified)
+            strength = 0
+            if signals['order_flow'] != 0:
+                strength += 40
+            if signals['volume_profile'] != 0:
+                strength += 30
+            if signals['market_structure'] != 0:
+                strength += 30
+            
+            strength = int(strength * signals['session_adjustment'])
+            
+            # Determine if should trade
+            can_trade = current_bar.get('can_trade', True)
+            
+            if alignment['aligned_bullish'] and strength >= self.signal_generator.min_signal_strength and can_trade:
+                data.loc[data.index[i], 'should_buy'] = True
+                data.loc[data.index[i], 'signal_strength'] = strength
+                data.loc[data.index[i], 'position_size'] = 2  # Default position size
+            elif alignment['aligned_bearish'] and strength >= self.signal_generator.min_signal_strength and can_trade:
+                data.loc[data.index[i], 'should_sell'] = True
+                data.loc[data.index[i], 'signal_strength'] = strength
+                data.loc[data.index[i], 'position_size'] = 2  # Default position size
+        
+        return data
+    
+    def _process_bar_fast(self, data: pd.DataFrame, i: int):
+        """Process a single bar (fast version - uses pre-calculated signals)"""
         current_bar = data.iloc[i]
         current_price = current_bar['close']
         timestamp = current_bar['datetime']
@@ -165,45 +224,61 @@ class Backtester:
         # Update existing trades
         self.trade_manager.update_trades(current_price, timestamp)
         
-        # Generate signal (only if we have enough data for indicators)
-        if i >= 50:  # Need at least 50 bars for indicators
-            recommendation = self.signal_generator.get_trade_recommendation(current_data)
-            
-            # Execute new trades
-            if recommendation['action'] in ['BUY', 'SELL']:
-                self._execute_trade(recommendation, current_price, timestamp)
+        # Check for new trade signals (from pre-calculated data)
+        if i >= 50:  # Need history for indicators
+            if current_bar['should_buy']:
+                self._execute_trade_fast(
+                    action='BUY',
+                    current_price=current_price,
+                    position_size=int(current_bar['position_size']),
+                    timestamp=timestamp
+                )
+            elif current_bar['should_sell']:
+                self._execute_trade_fast(
+                    action='SELL',
+                    current_price=current_price,
+                    position_size=int(current_bar['position_size']),
+                    timestamp=timestamp
+                )
         
         # Update equity curve
         self._update_equity()
     
-    def _execute_trade(
+    def _execute_trade_fast(
         self,
-        recommendation: Dict,
+        action: str,
         current_price: float,
+        position_size: int,
         timestamp: datetime
     ):
-        """Execute a trade based on recommendation"""
+        """Execute a trade (fast version)"""
         # Check if we can trade
         can_trade, reason = self.trade_manager.can_open_trade(timestamp)
         if not can_trade:
             return
         
         # Apply slippage
-        if recommendation['action'] == 'BUY':
+        if action == 'BUY':
             entry_price = current_price + (self.slippage_ticks * settings.TICK_SIZE)
             side = 'long'
+            stop_loss = entry_price - (settings.STOP_LOSS_TICKS * settings.TICK_SIZE)
+            take_profit_1 = entry_price + (settings.TAKE_PROFIT_1_TICKS * settings.TICK_SIZE)
+            take_profit_2 = entry_price + (settings.TAKE_PROFIT_2_TICKS * settings.TICK_SIZE)
         else:
             entry_price = current_price - (self.slippage_ticks * settings.TICK_SIZE)
             side = 'short'
+            stop_loss = entry_price + (settings.STOP_LOSS_TICKS * settings.TICK_SIZE)
+            take_profit_1 = entry_price - (settings.TAKE_PROFIT_1_TICKS * settings.TICK_SIZE)
+            take_profit_2 = entry_price - (settings.TAKE_PROFIT_2_TICKS * settings.TICK_SIZE)
         
         # Open trade
         trade = self.trade_manager.open_trade(
             side=side,
             entry_price=entry_price,
-            position_size=recommendation['position_size'],
-            stop_loss=recommendation['stop_loss'],
-            take_profit_1=recommendation['take_profit_1'],
-            take_profit_2=recommendation['take_profit_2'],
+            position_size=position_size,
+            stop_loss=stop_loss,
+            take_profit_1=take_profit_1,
+            take_profit_2=take_profit_2,
             timestamp=timestamp
         )
         
