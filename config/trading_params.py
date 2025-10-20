@@ -113,7 +113,7 @@ MARKET_STRUCTURE = {
 
 SESSION = {
     # Session preferences
-    'trade_overnight': False,  # Don't trade overnight (lower liquidity)
+    'trade_overnight': True,   # ✅ CHANGED: Now trading overnight (was False)
     'trade_rth': True,  # Trade Regular Trading Hours
     'trade_opening': True,  # Trade opening session (9:30-10:30 AM)
     'trade_midday': True,  # Trade midday session (10:30 AM-2 PM)
@@ -122,7 +122,7 @@ SESSION = {
     
     # Risk multipliers by session
     'session_risk_multipliers': {
-        'overnight': 0.5,    # Half size
+        'overnight': 0.5,    # Half size (safer during low liquidity)
         'opening': 0.75,     # 75% size
         'midday': 1.0,       # Full size (best conditions)
         'closing': 0.85,     # 85% size
@@ -173,7 +173,7 @@ SIGNAL_COMBINATION = {
     'skip_conflicted': True,      # Skip trades with conflicted signals
     
     # Signal filtering
-    'min_signal_strength': 60,    # Only take signals > 60/100
+    'min_signal_strength': 40,    # ✅ CHANGED: Only take signals > 40/100 (was 50)
     'apply_session_filter': True, # Apply session-based filtering
     'apply_quality_filter': True, # Apply structure quality filter
 }

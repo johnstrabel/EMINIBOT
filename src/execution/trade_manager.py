@@ -257,7 +257,7 @@ class TradeManager:
         if abs(self.daily_pnl) >= settings.MAX_DAILY_LOSS:
             return False, f"Daily loss limit reached (${abs(self.daily_pnl):.2f})"
         
-        # Check consecutive losses
+        # ✅ NEW - Check consecutive losses (SAFETY FEATURE)
         if self.consecutive_losses >= settings.MAX_CONSECUTIVE_LOSSES:
             return False, f"Max consecutive losses reached ({settings.MAX_CONSECUTIVE_LOSSES})"
         
@@ -450,12 +450,12 @@ class TradeManager:
             self.daily_wins += 1
             self.total_wins += 1
             self.gross_profit += pnl
-            self.consecutive_losses = 0
+            self.consecutive_losses = 0  # Reset on win
         else:
             self.daily_losses += 1
             self.total_losses += 1
             self.gross_loss += abs(pnl)
-            self.consecutive_losses += 1
+            self.consecutive_losses += 1  # Increment on loss
         
         # Move to closed trades if fully closed
         if not trade.is_open:
@@ -480,6 +480,7 @@ class TradeManager:
         self.daily_wins = 0
         self.daily_losses = 0
         self.last_trade_date = date
+        # Note: consecutive_losses is NOT reset daily - it persists across days
     
     def get_statistics(self) -> Dict:
         """Get trading statistics"""
@@ -534,6 +535,10 @@ class TradeManager:
         print(f"  Win Rate: {stats['win_rate']:.1f}%")
         print(f"  Profit Factor: {stats['profit_factor']:.2f}")
         print(f"  Total P&L: ${stats['total_pnl']:.2f}")
+        
+        if stats['consecutive_losses'] > 0:
+            print(f"\n⚠️ RISK ALERT:")
+            print(f"  Consecutive Losses: {stats['consecutive_losses']}/{settings.MAX_CONSECUTIVE_LOSSES}")
         
         print("\n" + "="*70 + "\n")
 

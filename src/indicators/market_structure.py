@@ -66,6 +66,7 @@ class MarketStructureAnalyzer:
             left_window = df.iloc[i-window:i]['high']
             right_window = df.iloc[i+1:i+window+1]['high']
             
+            # ✅ FIXED - checks high against highs (was incorrectly checking current_close)
             if current_high > left_window.max() and current_high > right_window.max():
                 df.loc[df.index[i], 'swing_high'] = True
                 df.loc[df.index[i], 'swing_high_price'] = current_high

@@ -1,23 +1,37 @@
 """
 Run Backtest on Real ES Data
+Automatically uses the most recent data file
 """
 
 import pandas as pd
+from pathlib import Path
 from src.analysis.backtester import Backtester
 
 print("="*70)
 print("RUNNING BACKTEST ON REAL ES DATA")
 print("="*70)
 
-# Load the real ES data
-print("\n📊 Loading data...")
-df = pd.read_csv('data/historical/ES_yahoo_20251013_to_20251020.csv')
+# Find the most recent data file
+data_dir = Path('data/historical')
+data_files = list(data_dir.glob('ES_yahoo_*.csv'))
 
-print(f"✅ Loaded {len(df)} bars")
+if not data_files:
+    print("\n❌ ERROR: No data files found!")
+    print("   Run: python download_extended_data.py")
+    exit(1)
+
+# Get the largest (most recent/most data) file
+latest_file = max(data_files, key=lambda f: f.stat().st_size)
+
+print(f"\n📊 Loading data from: {latest_file.name}")
+df = pd.read_csv(latest_file)
+
+print(f"✅ Loaded {len(df):,} bars")
 print(f"   Date range: {df['datetime'].iloc[0]} to {df['datetime'].iloc[-1]}")
 print(f"   Price range: ${df['close'].min():.2f} - ${df['close'].max():.2f}")
 
 # Initialize backtester
+print("\n🚀 Running backtest...")
 backtester = Backtester(
     initial_capital=50000,
     commission_per_contract=1.0,
@@ -25,7 +39,6 @@ backtester = Backtester(
 )
 
 # Run backtest
-print("\n🚀 Running backtest...")
 results = backtester.run(df, verbose=True)
 
 # Get trade log
@@ -56,6 +69,13 @@ if len(trade_log) > 0:
         print(f"\n🔴 Worst trade: ${losses['total_pnl'].min():.2f}")
         worst = losses.loc[losses['total_pnl'].idxmin()]
         print(f"   {worst['trade_id']}: {worst['side'].upper()} from ${worst['entry_price']:.2f} to ${worst['exit_price']:.2f}")
+    
+    # Exit reason breakdown
+    print(f"\n📊 Exit Reasons:")
+    exit_reasons = trade_log['exit_reason'].value_counts()
+    for reason, count in exit_reasons.items():
+        print(f"   {reason}: {count}")
+    
 else:
     print("\n⚠️ No trades executed - signals may need adjustment")
 
